@@ -416,6 +416,7 @@
         <span id="vertexBadge" style="background:rgba(168,85,247,0.2); border:1px solid var(--purple); color:var(--purple); padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">0 vertices</span>
       </div>
       <div class="btn-group">
+        <button id="closeShapeBtn" class="secondary" style="font-size:11px; padding:4px 8px; color:#A855F7; font-weight:700;">📐 Close Shape</button>
         <button id="undoZoneBtn" class="secondary" style="font-size:11px; padding:4px 8px;">↩ Undo</button>
         <button id="clearZoneBtn" class="secondary" style="font-size:11px; padding:4px 8px;">🗑 Clear</button>
         <button id="saveZoneBtn" style="font-size:11px; padding:4px 12px; background:var(--purple); color:#fff; font-weight:700;">💾 Save Polygon</button>
@@ -637,6 +638,7 @@ const saveZoneBtn = document.getElementById("saveZoneBtn");
 const cancelZoneBtn = document.getElementById("cancelZoneBtn");
 const editorBar = document.getElementById("editorBar");
 const vertexBadge = document.getElementById("vertexBadge");
+const closeShapeBtn = document.getElementById("closeShapeBtn");
 const undoZoneBtn = document.getElementById("undoZoneBtn");
 const clearZoneBtn = document.getElementById("clearZoneBtn");
 const saveZoneModal = document.getElementById("saveZoneModal");
@@ -1239,6 +1241,7 @@ function openSaveZoneModal() {
 }
 
 saveZoneBtn.addEventListener("click", openSaveZoneModal);
+closeShapeBtn.addEventListener("click", openSaveZoneModal);
 
 closeSaveZoneModalBtn.addEventListener("click", () => saveZoneModal.style.display = "none");
 cancelSaveZoneModalBtn.addEventListener("click", () => saveZoneModal.style.display = "none");
