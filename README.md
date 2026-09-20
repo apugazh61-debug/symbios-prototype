@@ -1,6 +1,10 @@
-# SYMBIOS — Hackathon Prototype
+# SYMBIOS — Industrial Safety & Workforce Orchestration
 
-A working MVP of the fatigue + safety-zone aware task orchestration
+[![CI - Safety & Test Suite](https://github.com/apugazh61-debug/symbios-prototype/actions/workflows/ci.yml/badge.svg)](https://github.com/apugazh61-debug/symbios-prototype/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)
+![Tests Passed](https://img.shields.io/badge/tests-74%20passed-brightgreen.svg)
+![Compliance](https://img.shields.io/badge/Compliance-OSHA%20%7C%20ISO%2045001-orange.svg)
 system described in the pitch deck. Fully software: your laptop
 webcam is the only "hardware" involved.
 
