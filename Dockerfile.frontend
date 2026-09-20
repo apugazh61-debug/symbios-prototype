@@ -1,0 +1,10 @@
+# Dockerfile.frontend
+# Production Nginx container for SYMBIOS Industrial Safety HMI
+
+FROM nginx:alpine
+
+COPY frontend /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

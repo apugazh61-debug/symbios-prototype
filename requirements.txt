@@ -1,0 +1,32 @@
+# Core Web & API
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-multipart==0.0.32
+email-validator==2.3.0
+websockets==17.1
+
+# Computer Vision & Machine Learning
+mediapipe==0.10.14
+opencv-python==4.10.0.84
+numpy==2.4.6
+shapely==2.1.2
+
+# Database & Migrations
+sqlalchemy==2.0.54
+alembic==1.20.0
+
+# Cryptography & Security
+bcrypt==5.0.0
+pyjwt==2.14.0
+
+# Observability & Monitoring
+prometheus-client==0.26.0
+
+# Explainability & LLM (Optional)
+anthropic==1.7.0
+httpx==0.28.1
+
+# Testing
+pytest==9.1.1

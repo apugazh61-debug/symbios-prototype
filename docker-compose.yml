@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # 1. Primary Relational & Geospatial Store
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: symbios-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: symbios_db
+      POSTGRES_USER: symbios_user
+      POSTGRES_PASSWORD: symbios_secure_password_123!
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U symbios_user -d symbios_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Message Queue & Stream Bus
+  redis:
+    image: redis:7-alpine
+    container_name: symbios-redis
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # 3. SYMBIOS Enterprise Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: symbios-backend
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://symbios_user:symbios_secure_password_123!@postgres:5432/symbios_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=symbios-enterprise-safety-secret-key-change-in-production-32bytes-min!
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ENVIRONMENT=production
+      - DEBUG=false
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # 4. SYMBIOS Safety HMI Dashboard
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: symbios-dashboard
+    restart: always
+    ports:
+      - "5500:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:

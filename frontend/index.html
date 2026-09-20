@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SYMBIOS — Enterprise Industrial Safety & Workforce Orchestration</title>
+<style>
+  :root {
+    --bg-primary: #0E1117;
+    --bg-surface: #171B24;
+    --bg-card: #202531;
+    --bg-card-hover: #282E3D;
+    --border-color: #2F3646;
+    --text-main: #F0F3F8;
+    --text-muted: #8A94A6;
+    --amber: #FFB000;
+    --amber-glow: rgba(255, 176, 0, 0.2);
+    --danger: #E85C4A;
+    --danger-glow: rgba(232, 92, 74, 0.25);
+    --ok: #34D399;
+    --ok-glow: rgba(52, 211, 153, 0.2);
+    --blue: #38BDF8;
+    --purple: #A855F7;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Top Navigation Bar */
+  header {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo-badge {
+    background: linear-gradient(135deg, var(--amber), #D97706);
+    color: #000;
+    font-weight: 900;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    letter-spacing: 1px;
+  }
+  .brand-text h1 { font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
+  .brand-text span { font-size: 12px; color: var(--text-muted); }
+
+  .header-actions { display: flex; align-items: center; gap: 16px; }
+  .role-badge {
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid var(--blue);
+    color: var(--blue);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .sys-health {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--ok);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--ok);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* KPI Summary Ribbon */
+  .kpi-ribbon {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 16px 24px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+  }
+  .kpi-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .kpi-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+  .kpi-val { font-size: 20px; font-weight: 800; color: var(--text-main); }
+  .kpi-sub { font-size: 11px; color: var(--ok); font-weight: 500; }
+
+  /* Main Workspace Layout */
+  .workspace {
+    display: grid;
+    grid-template-columns: 1fr 420px;
+    gap: 20px;
+    padding: 24px;
+    flex: 1;
+  }
+  @media (max-width: 1200px) {
+    .workspace { grid-template-columns: 1fr; }
+  }
+
+  /* Left Column: Video & Zone Editor */
+  .video-container {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .video-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .feed-title { font-size: 14px; font-weight: 700; color: var(--text-main); }
+  .feed-meta { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  .video-viewport {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4/3;
+    max-height: 520px;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+  }
+  video, #overlayCanvas, #drawCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  #overlayCanvas { pointer-events: none; z-index: 2; }
+  #drawCanvas { z-index: 3; display: none; cursor: crosshair; }
+
+  #videoPlaceholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px;
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 14px;
+    z-index: 1;
+  }
+  #videoPlaceholder .icon { font-size: 40px; }
+
+  /* Camera Controls */
+  .camera-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .btn-group { display: flex; gap: 8px; }
+  button {
+    background: var(--amber);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+  }
+  button:hover { opacity: 0.9; transform: translateY(-1px); }
+  button.secondary { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color); }
+  button.secondary:hover { background: var(--bg-card-hover); }
+  button.danger { background: var(--danger); color: #fff; }
+
+  /* Polygon Zone Drawing Bar */
+  .editor-bar {
+    background: rgba(168, 85, 247, 0.1);
+    border: 1px dashed var(--purple);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+  }
+
+  /* Right Column: Decisions, Cobots, Explainability */
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .panel-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card-title {
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* Fatigue Meter */
+  .fatigue-display {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .fatigue-num { font-size: 42px; font-weight: 900; color: var(--amber); line-height: 1; font-family: var(--font-mono); }
+  .fatigue-unit { font-size: 14px; color: var(--text-muted); font-weight: 600; }
+  .fatigue-bar-track {
+    background: #11141B;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+  }
+  .fatigue-bar-val {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--ok), var(--amber), var(--danger));
+    transition: width 0.3s ease;
+  }
+
+  /* Decision Badge */
+  .decision-badge-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    display: inline-block;
+  }
+  .badge.info { background: rgba(56, 189, 248, 0.15); color: var(--blue); border: 1px solid var(--blue); }
+  .badge.warning { background: var(--amber-glow); color: var(--amber); border: 1px solid var(--amber); }
+  .badge.critical { background: var(--danger-glow); color: var(--danger); border: 1px solid var(--danger); }
+
+  /* Cobot Status Box */
+  .cobot-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cobot-info { display: flex; flex-direction: column; gap: 2px; }
+  .cobot-name { font-size: 13px; font-weight: 700; }
+  .cobot-task { font-size: 11px; color: var(--text-muted); }
+
+  /* Copilot Box */
+  .copilot-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #CBD5E1;
+    min-height: 80px;
+  }
+  .copilot-meta { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+  /* Audit Log */
+  .audit-list {
+    max-height: 180px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .audit-item {
+    font-size: 11.5px;
+    font-family: var(--font-mono);
+    padding: 6px 8px;
+    background: var(--bg-card);
+    border-radius: 4px;
+    border-left: 3px solid var(--blue);
+  }
+  .audit-item.critical { border-left-color: var(--danger); }
+  .audit-item.warning { border-left-color: var(--amber); }
+
+  /* Modal for OSHA Incident Report */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 99;
+    padding: 20px;
+  }
+  .modal-dialog {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 680px;
+    max-width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .modal-title { font-size: 18px; font-weight: 800; color: var(--amber); }
+  .report-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+  .report-table td { padding: 8px; border: 1px solid var(--border-color); }
+  .report-table td:first-child { font-weight: 700; width: 35%; color: var(--text-muted); background: var(--bg-card); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="brand">
+    <div class="logo-badge">SYMBIOS</div>
+    <div class="brand-text">
+      <h1>Industrial Safety & Workforce Orchestration</h1>
+      <span>Factory Intelligence Platform · ISO 45001 & OSHA Compliant</span>
+    </div>
+  </div>
+
+  <div class="header-actions">
+    <div class="sys-health">
+      <div class="pulse-dot"></div>
+      <span id="healthLabel">Engine Online (0.0.0.0:8000)</span>
+    </div>
+    <div id="authStatusBadge" class="role-badge" style="background: rgba(148, 163, 184, 0.15); border: 1px solid #64748B; color: #94A3B8;">Viewer (Read-Only)</div>
+    <button id="authBtn" style="background: var(--blue); color: #000; font-weight: 700; padding: 6px 14px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer;">Supervisor Login</button>
+  </div>
+</header>
+
+<!-- KPI Summary Ribbon -->
+<div class="kpi-ribbon">
+  <div class="kpi-box">
+    <div class="kpi-title">Active Workcells</div>
+    <div class="kpi-val" id="kpiCameras">1 Online</div>
+    <div class="kpi-sub">Cell 4 (Detroit Assembly)</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-title">Tracked Personnel</div>
+    <div class="kpi-val" id="kpiWorkers">1 Operator</div>
+    <div class="kpi-sub">Pseudonymized (GDPR Art. 9)</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-title">Cobot Fleet Readiness</div>
+    <div class="kpi-val" id="kpiCobotStatus">UR10e (IDLE)</div>
+    <div class="kpi-sub" id="kpiCobotTask">Ready for handover</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-title">Safety Zone Boundary</div>
+    <div class="kpi-val" id="kpiZones">1 Active Polygon</div>
+    <div class="kpi-sub">Robotic Arm Envelope</div>
+  </div>
+</div>
+
+<!-- Main Workspace -->
+<main class="workspace">
+  <!-- Left Side: Live Feed & Zone Editor -->
+  <div class="video-container">
+    <div class="video-header">
+      <div>
+        <div class="feed-title">Assembly Cell 4 — Primary Collaborative Station</div>
+        <div class="feed-meta" id="feedMeta">RTSP Stream 5 FPS · Zero-Raw-Video In-Memory Pipeline</div>
+      </div>
+      <button class="secondary" id="drawZoneBtn">✏️ Define Safety Polygon</button>
+    </div>
+
+    <!-- Drawing Instruction Bar (Appears in Editor Mode) -->
+    <div class="editor-bar" id="editorBar">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span><strong>Polygon Editor:</strong> Click video to place vertices. Double-click or click "Save" to finalize.</span>
+        <span id="vertexBadge" style="background:rgba(168,85,247,0.2); border:1px solid var(--purple); color:var(--purple); padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">0 vertices</span>
+      </div>
+      <div class="btn-group">
+        <button id="undoZoneBtn" class="secondary" style="font-size:11px; padding:4px 8px;">↩ Undo</button>
+        <button id="clearZoneBtn" class="secondary" style="font-size:11px; padding:4px 8px;">🗑 Clear</button>
+        <button id="saveZoneBtn" style="font-size:11px; padding:4px 12px; background:var(--purple); color:#fff; font-weight:700;">💾 Save Polygon</button>
+        <button class="secondary" id="cancelZoneBtn" style="font-size:11px; padding:4px 8px;">✕ Cancel</button>
+      </div>
+    </div>
+
+    <div class="video-viewport">
+      <video id="videoFeed" autoplay muted playsinline></video>
+      <canvas id="overlayCanvas"></canvas>
+      <canvas id="drawCanvas"></canvas>
+      <div id="videoPlaceholder">
+        <div class="icon">📷</div>
+        <div style="font-weight:700;">Camera Stream Inactive</div>
+        <div style="font-size:12px;">Click "Start Camera" to initialize the MediaPipe edge perception pipeline</div>
+      </div>
+    </div>
+
+    <div class="camera-bar">
+      <div class="btn-group">
+        <button id="startCamBtn">▶ Start Camera Feed</button>
+        <button class="secondary" id="stopCamBtn">⏹ Stop</button>
+      </div>
+      <div style="font-size:12px; color:var(--text-muted);" id="statusText">System ready.</div>
+    </div>
+  </div>
+
+  <!-- Right Side: Decision, Cobot Fleet, Copilot, Audit Log -->
+  <div class="right-panel">
+
+    <!-- Card 1: Fatigue Monitor -->
+    <div class="panel-card">
+      <div class="card-title">
+        <span>Operator Fatigue Index</span>
+        <span style="font-size:11px; font-weight:400;" id="slumpLabel">Slump: 0.0°</span>
+      </div>
+      <div class="fatigue-display">
+        <div class="fatigue-num" id="fatigueVal">--</div>
+        <div class="fatigue-unit">/ 100 Index</div>
+      </div>
+      <div class="fatigue-bar-track">
+        <div class="fatigue-bar-val" id="fatigueBar"></div>
+      </div>
+    </div>
+
+    <!-- Card 2: Current Decision & Cobot State -->
+    <div class="panel-card">
+      <div class="card-title">Orchestration Decision</div>
+      <div class="decision-badge-wrap">
+        <div class="badge info" id="decisionBadge">NORMAL</div>
+        <span style="font-size:13px;" id="decisionSub">Waiting for perception feed…</span>
+      </div>
+      
+      <!-- Cobot Fleet Status Sub-Box -->
+      <div class="cobot-box">
+        <div class="cobot-info">
+          <div class="cobot-name">🤖 UR10e Cobot Station</div>
+          <div class="cobot-task" id="cobotTaskDesc">State: IDLE (Standby)</div>
+        </div>
+        <button class="secondary" style="padding:4px 8px; font-size:11px;" id="resetCobotBtn">Reset IDLE</button>
+      </div>
+    </div>
+
+    <!-- Card 3: AI Safety Copilot -->
+    <div class="panel-card">
+      <div class="card-title">
+        <span>Explainable AI Copilot</span>
+        <button class="secondary" style="padding:4px 8px; font-size:11px;" id="oshaReportBtn">📄 OSHA Report</button>
+      </div>
+      <div class="copilot-content" id="copilotText">
+        Click "Explain Decision" to generate an ISO 45001-compliant rationale for the current automated action.
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <button id="explainBtn" style="width:100%;">💡 Explain Decision</button>
+      </div>
+      <div class="copilot-meta" id="copilotMeta">Source: Deterministic Safety Engine</div>
+    </div>
+
+    <!-- Card 4: Safety Audit Trail -->
+    <div class="panel-card">
+      <div class="card-title">Immutable Event Audit Trail</div>
+      <div class="audit-list" id="auditList">
+        <div class="audit-item">[SYSTEM] SYMBIOS v2.0 Enterprise safety daemon online.</div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- OSHA Incident Report Modal -->
+<div class="modal-backdrop" id="oshaModal">
+  <div class="modal-dialog">
+    <div class="modal-title">EHS Safety Incident & Automated Preemption Report</div>
+    <div style="font-size:12px; color:var(--text-muted);">Standard: ISO 45001:2018 (Section 8.1.2) & OSHA Form 301 Compatible</div>
+    
+    <table class="report-table">
+      <tr><td>Report Reference</td><td id="rptId">--</td></tr>
+      <tr><td>Generated Timestamp</td><td id="rptTime">--</td></tr>
+      <tr><td>Facility & Workcell</td><td id="rptCell">Apex Detroit Plant 01 — Cell 4</td></tr>
+      <tr><td>Worker Subject</td><td id="rptWorker">OPERATOR_TOKEN_99A (Pseudonymized)</td></tr>
+      <tr><td>Action Enforced</td><td id="rptAction" style="font-weight:700; color:var(--amber);">--</td></tr>
+      <tr><td>Fatigue Metrics</td><td id="rptMetrics">--</td></tr>
+      <tr><td>Safety Zone Breach</td><td id="rptZone">--</td></tr>
+      <tr><td>Cobot Intervention</td><td id="rptCobot">--</td></tr>
+      <tr><td>Automated Rationale</td><td id="rptRationale">--</td></tr>
+    </table>
+
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+      <button class="secondary" id="closeModalBtn">Close</button>
+      <button id="printModalBtn">🖨️ Print / Export PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Supervisor Login Modal -->
+<div class="modal-backdrop" id="loginModal">
+  <div class="modal-dialog" style="width: 440px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+      <div style="font-size:16px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+        <span>🔐</span> Supervisor Authentication
+      </div>
+      <button id="closeLoginModalBtn" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:18px;">✕</button>
+    </div>
+    
+    <div id="loginModalHint" style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+      Authentication required to modify safety zones and override cobot state.
+    </div>
+    <div id="loginErrorBanner" style="display:none; padding:8px 12px; border-radius:6px; background:var(--danger-glow); border:1px solid var(--danger); color:var(--danger); font-size:12px; font-weight:600;"></div>
+
+    <form id="loginForm" style="display:flex; flex-direction:column; gap:12px; margin-top:4px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Supervisor Email</label>
+        <input type="email" id="loginEmail" required placeholder="supervisor@symbios.ai" style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;" />
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Password</label>
+        <input type="password" id="loginPassword" required placeholder="••••••••••••" style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;" />
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+        <button type="button" class="secondary" id="cancelLoginBtn">Cancel</button>
+        <button type="submit" id="submitLoginBtn" style="background:var(--blue); color:#000; font-weight:700; padding:8px 16px; border-radius:6px;">Login</button>
+      </div>
+    </form>
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; border-top:1px solid var(--border-color); padding-top:8px;">
+      Tokens are held in-memory for session lifetime only (No persistent storage).
+    </div>
+  </div>
+</div>
+
+<!-- Save Safety Zone Modal -->
+<div class="modal-backdrop" id="saveZoneModal">
+  <div class="modal-dialog" style="width: 480px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+      <div style="font-size:16px; font-weight:800; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+        <span>📐</span> Save Safety Polygon
+      </div>
+      <button id="closeSaveZoneModalBtn" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:18px;">✕</button>
+    </div>
+
+    <div id="saveZoneErrorBanner" style="display:none; padding:8px 12px; border-radius:6px; background:var(--danger-glow); border:1px solid var(--danger); color:var(--danger); font-size:12px; font-weight:600; margin-top:8px;"></div>
+
+    <form id="saveZoneForm" style="display:flex; flex-direction:column; gap:12px; margin-top:10px;">
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Zone Name</label>
+        <input type="text" id="zoneNameInput" required value="Robotic Arm Envelope" style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;" />
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Risk Tier & Preemption Action</label>
+        <select id="zoneRiskSelect" style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;">
+          <option value="high" selected>HIGH — Dynamic Cobot Reallocation (Fatigue Takeover)</option>
+          <option value="critical">CRITICAL — Emergency Stop (ESTOP)</option>
+          <option value="medium">MEDIUM — Proximity Caution Warning</option>
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Save Mode</label>
+        <select id="zoneSaveModeSelect" style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;">
+          <option value="replace" selected>Atomic Update: Replace Active Workcell Zone</option>
+          <option value="add">Append: Add as Additional Active Zone</option>
+        </select>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Audit Trail Change Reason</label>
+        <input type="text" id="zoneReasonInput" value="Calibrated robot arm reach extension" required style="background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); padding:9px 12px; border-radius:6px; font-size:13px; outline:none;" />
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+        <span id="modalVertexCount" style="font-size:12px; color:var(--text-muted);">Vertices: 0</span>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="secondary" id="cancelSaveZoneModalBtn">Cancel</button>
+          <button type="submit" id="confirmSaveZoneBtn" style="background:var(--purple); color:#fff; font-weight:700; padding:8px 16px; border-radius:6px;">Confirm & Persist</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API_BASE = `http://${window.location.hostname || "127.0.0.1"}:8000`;
+
+// Element References
+const video = document.getElementById("videoFeed");
+const overlay = document.getElementById("overlayCanvas");
+const drawCanvas = document.getElementById("drawCanvas");
+const ctx = overlay.getContext("2d");
+const dctx = drawCanvas.getContext("2d");
+const captureCanvas = document.createElement("canvas");
+const placeholder = document.getElementById("videoPlaceholder");
+const statusText = document.getElementById("statusText");
+
+// Buttons & Panels
+const startBtn = document.getElementById("startCamBtn");
+const stopBtn = document.getElementById("stopCamBtn");
+const drawZoneBtn = document.getElementById("drawZoneBtn");
+const saveZoneBtn = document.getElementById("saveZoneBtn");
+const cancelZoneBtn = document.getElementById("cancelZoneBtn");
+const editorBar = document.getElementById("editorBar");
+const vertexBadge = document.getElementById("vertexBadge");
+const undoZoneBtn = document.getElementById("undoZoneBtn");
+const clearZoneBtn = document.getElementById("clearZoneBtn");
+const saveZoneModal = document.getElementById("saveZoneModal");
+const saveZoneForm = document.getElementById("saveZoneForm");
+const zoneNameInput = document.getElementById("zoneNameInput");
+const zoneRiskSelect = document.getElementById("zoneRiskSelect");
+const zoneSaveModeSelect = document.getElementById("zoneSaveModeSelect");
+const zoneReasonInput = document.getElementById("zoneReasonInput");
+const modalVertexCount = document.getElementById("modalVertexCount");
+const saveZoneErrorBanner = document.getElementById("saveZoneErrorBanner");
+const closeSaveZoneModalBtn = document.getElementById("closeSaveZoneModalBtn");
+const cancelSaveZoneModalBtn = document.getElementById("cancelSaveZoneModalBtn");
+const explainBtn = document.getElementById("explainBtn");
+const resetCobotBtn = document.getElementById("resetCobotBtn");
+const oshaReportBtn = document.getElementById("oshaReportBtn");
+const oshaModal = document.getElementById("oshaModal");
+const closeModalBtn = document.getElementById("closeModalBtn");
+
+
+// Supervisor Login & Auth UI Elements
+const loginModal = document.getElementById("loginModal");
+const loginForm = document.getElementById("loginForm");
+const loginEmailInput = document.getElementById("loginEmail");
+const loginPasswordInput = document.getElementById("loginPassword");
+const loginErrorBanner = document.getElementById("loginErrorBanner");
+const loginModalHint = document.getElementById("loginModalHint");
+const authStatusBadge = document.getElementById("authStatusBadge");
+const authBtn = document.getElementById("authBtn");
+const closeLoginModalBtn = document.getElementById("closeLoginModalBtn");
+const cancelLoginBtn = document.getElementById("cancelLoginBtn");
+
+// Runtime State (Tokens held strictly in-memory, never in localStorage/sessionStorage)
+let sessionAuth = {
+  token: null,
+  role: null,
+  email: null
+};
+
+let stream = null;
+let loopHandle = null;
+let activeZones = [];
+let drawingMode = false;
+let currentPolygon = [];
+let lastLoggedDecisionId = null;
+
+function updateAuthUI() {
+  if (sessionAuth.token) {
+    authStatusBadge.textContent = `${sessionAuth.email} (${sessionAuth.role.toUpperCase()})`;
+    authStatusBadge.style.background = "rgba(16, 185, 129, 0.15)";
+    authStatusBadge.style.borderColor = "var(--ok)";
+    authStatusBadge.style.color = "var(--ok)";
+    authBtn.textContent = "Logout";
+    authBtn.style.background = "var(--bg-card)";
+    authBtn.style.color = "var(--text-main)";
+    resetCobotBtn.removeAttribute("title");
+    saveZoneBtn.removeAttribute("title");
+  } else {
+    authStatusBadge.textContent = "Viewer (Read-Only)";
+    authStatusBadge.style.background = "rgba(148, 163, 184, 0.15)";
+    authStatusBadge.style.borderColor = "#64748B";
+    authStatusBadge.style.color = "#94A3B8";
+    authBtn.textContent = "Supervisor Login";
+    authBtn.style.background = "var(--blue)";
+    authBtn.style.color = "#000";
+    resetCobotBtn.setAttribute("title", "Supervisor login required");
+    saveZoneBtn.setAttribute("title", "Supervisor login required");
+  }
+}
+
+function showLoginModal(hintMessage) {
+  loginModalHint.textContent = hintMessage || "Authentication required to modify safety zones and override cobot state.";
+  loginErrorBanner.style.display = "none";
+  loginPasswordInput.value = "";
+  loginModal.style.display = "flex";
+  loginEmailInput.focus();
+}
+
+function hideLoginModal() {
+  loginModal.style.display = "none";
+}
+
+authBtn.addEventListener("click", () => {
+  if (sessionAuth.token) {
+    sessionAuth.token = null;
+    sessionAuth.role = null;
+    sessionAuth.email = null;
+    updateAuthUI();
+  } else {
+    showLoginModal();
+  }
+});
+
+closeLoginModalBtn.addEventListener("click", hideLoginModal);
+cancelLoginBtn.addEventListener("click", hideLoginModal);
+
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  loginErrorBanner.style.display = "none";
+  const email = loginEmailInput.value.trim();
+  const password = loginPasswordInput.value;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username: email, password: password })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      sessionAuth.token = data.access_token;
+      sessionAuth.role = data.role;
+      sessionAuth.email = email;
+      updateAuthUI();
+      hideLoginModal();
+    } else if (res.status === 429) {
+      const err = await res.json().catch(() => ({ detail: "Rate limit exceeded" }));
+      loginErrorBanner.textContent = err.detail || "Too many failed attempts. Account/IP temporarily locked.";
+      loginErrorBanner.style.display = "block";
+    } else {
+      loginErrorBanner.textContent = "Invalid email or password.";
+      loginErrorBanner.style.display = "block";
+    }
+  } catch (err) {
+    loginErrorBanner.textContent = "Connection error. Is API backend reachable?";
+    loginErrorBanner.style.display = "block";
+  }
+});
+
+// Update initial button state
+updateAuthUI();
+
+// Initialize & Load Zones from Database
+async function loadSafetyZones() {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/zones`);
+    activeZones = await res.json();
+    document.getElementById("kpiZones").textContent = `${activeZones.length} Active Polygon${activeZones.length !== 1 ? 's' : ''}`;
+    drawZones();
+  } catch (e) {
+    console.error("Failed to load zones:", e);
+  }
+}
+
+// Render Polygon Safety Zones
+function drawZones() {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  activeZones.forEach(z => {
+    const coords = z.polygon_coordinates;
+    if (!coords || coords.length < 3) return;
+
+    ctx.beginPath();
+    coords.forEach((pt, idx) => {
+      const px = pt[0] * overlay.width;
+      const py = pt[1] * overlay.height;
+      if (idx === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+
+    // Style by risk tier
+    const isCritical = z.risk_tier === "critical" || z.risk_tier === "high";
+    ctx.strokeStyle = isCritical ? "#E85C4A" : "#FFB000";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 6]);
+    ctx.stroke();
+
+    // Translucent fill
+    ctx.fillStyle = isCritical ? "rgba(232, 92, 74, 0.15)" : "rgba(255, 176, 0, 0.12)";
+    ctx.fill();
+
+    // Zone Label
+    ctx.setLineDash([]);
+    ctx.fillStyle = isCritical ? "#E85C4A" : "#FFB000";
+    ctx.font = "bold 13px sans-serif";
+    const firstX = coords[0][0] * overlay.width;
+    const firstY = coords[0][1] * overlay.height;
+    ctx.fillText(`${z.name} [${z.risk_tier.toUpperCase()}]`, firstX + 8, firstY + 20);
+  });
+}
+
+// Start Camera Stream
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert("Camera permission blocked on HTTP! Go to chrome://flags/#unsafely-treat-insecure-origin-as-secure and enable this origin.");
+    return;
+  }
+
+  try {
+    statusText.textContent = "Connecting to optical sensor…";
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    video.srcObject = stream;
+    await video.play();
+
+    overlay.width = video.videoWidth || 640;
+    overlay.height = video.videoHeight || 480;
+    drawCanvas.width = overlay.width;
+    drawCanvas.height = overlay.height;
+    captureCanvas.width = overlay.width;
+    captureCanvas.height = overlay.height;
+
+    placeholder.style.display = "none";
+    await loadSafetyZones();
+    drawZones();
+
+    loopHandle = setInterval(captureAndAnalyze, 800);
+    statusText.textContent = "Perception active. Analyzing worker kinematics.";
+    addAuditEntry("Camera stream activated. Edge perception worker attached.", "info", "CAMERA_START");
+  } catch (e) {
+    statusText.textContent = "Camera initialization failed: " + e.message;
+  }
+}
+
+// Stop Camera Stream
+function stopCamera() {
+  if (loopHandle) { clearInterval(loopHandle); loopHandle = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  placeholder.style.display = "flex";
+  statusText.textContent = "Camera stopped.";
+  addAuditEntry("Camera stream stopped.", "info", "CAMERA_STOP");
+}
+
+// Capture Frame & Send to API
+async function captureAndAnalyze() {
+  const cctx = captureCanvas.getContext("2d");
+  cctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+  const dataUrl = captureCanvas.toDataURL("image/jpeg", 0.7);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/decisions/analyze_frame`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_base64: dataUrl }),
+    });
+    const data = await res.json();
+
+    if (data.person_detected && data.active_decision) {
+      updateDashboardUI(data);
+    } else {
+      statusText.textContent = "Feed active — waiting for operator to enter cell.";
+    }
+  } catch (e) {
+    statusText.textContent = "API link disconnected — check uvicorn daemon.";
+  }
+  drawZones();
+}
+
+// Update Dashboard Widgets
+function updateDashboardUI(data) {
+  const dec = data.active_decision;
+  const score = Math.round(dec.fatigue_score);
+
+  // Fatigue Meter
+  document.getElementById("fatigueVal").textContent = score;
+  document.getElementById("fatigueBar").style.width = `${score}%`;
+
+  if (data.tracked_workers && data.tracked_workers[0]) {
+    document.getElementById("slumpLabel").textContent = `Slump: ${data.tracked_workers[0].slump_angle}°`;
+  }
+
+  // Decision Badge
+  const badge = document.getElementById("decisionBadge");
+  badge.textContent = dec.action.replace(/_/g, " ");
+  badge.className = `badge ${dec.severity}`;
+
+  document.getElementById("decisionSub").textContent =
+    `Fatigue: ${dec.fatigue_score}/100 · Inside Zone: ${dec.in_zone ? (dec.zone_label || "Active Area") : "Clear"}`;
+
+  // Cobot Widget
+  if (dec.cobot_reassigned) {
+    document.getElementById("kpiCobotStatus").textContent = "REASSIGNED";
+    document.getElementById("kpiCobotTask").textContent = "Primary task reallocated";
+    document.getElementById("cobotTaskDesc").textContent = "State: ACTIVE REALLOCATION (Handling payload)";
+  }
+
+  // Safety decision events are auto-logged to SQLite by backend decisions.py (single source of truth).
+  // Frontend refreshes from database whenever a new decision log is recorded.
+  if (dec.severity === "critical" || dec.severity === "warning") {
+    if (dec.decision_log_id && dec.decision_log_id !== lastLoggedDecisionId) {
+      lastLoggedDecisionId = dec.decision_log_id;
+      loadAuditLogs();
+    }
+  }
+}
+
+// Persistent Audit Trail Loader & Logger (Relational Database)
+async function loadAuditLogs() {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/audit/logs?limit=40`);
+    if (!res.ok) return;
+    const logs = await res.json();
+    const list = document.getElementById("auditList");
+    list.innerHTML = "";
+    if (logs.length === 0) {
+      list.innerHTML = '<div class="audit-item info">[SYSTEM] SYMBIOS v2.0 Enterprise safety daemon online.</div>';
+      return;
+    }
+    logs.forEach(log => {
+      const item = document.createElement("div");
+      item.className = `audit-item ${log.severity || 'info'}`;
+      const timeStr = new Date(log.created_at).toLocaleTimeString();
+      item.textContent = `[${timeStr}] [${log.action}] ${log.message}`;
+      list.appendChild(item);
+    });
+  } catch (e) {
+    console.error("Failed to load audit logs:", e);
+  }
+}
+
+async function addAuditEntry(text, severity = "info", action = "OPERATOR_EVENT") {
+  const list = document.getElementById("auditList");
+  const item = document.createElement("div");
+  item.className = `audit-item ${severity}`;
+  const timeStr = new Date().toLocaleTimeString();
+  item.textContent = `[${timeStr}] [${action}] ${text}`;
+  list.prepend(item);
+
+  try {
+    await fetch(`${API_BASE}/api/v1/audit/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: action,
+        message: text,
+        severity: severity,
+        entity_type: "Workcell-Cell4"
+      })
+    });
+  } catch (e) {
+    console.error("Failed to persist audit log to DB:", e);
+  }
+}
+
+resetCobotBtn.addEventListener("click", async () => {
+  if (!sessionAuth.token) {
+    showLoginModal("Supervisor login required to reset cobot workcell to IDLE.");
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/cobots/cobot-cell-01/reset`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${sessionAuth.token}` }
+    });
+    if (res.ok) {
+      document.getElementById("kpiCobotStatus").textContent = "UR10e (IDLE)";
+      document.getElementById("kpiCobotTask").textContent = "Ready for handover";
+      document.getElementById("cobotTaskDesc").textContent = "State: IDLE (Standby)";
+      await loadAuditLogs();
+    } else if (res.status === 401 || res.status === 403) {
+      alert("Unauthorized: Supervisor privileges required to reset cobot.");
+      sessionAuth.token = null;
+      updateAuthUI();
+      showLoginModal("Session expired or invalid. Please re-authenticate.");
+    } else {
+      alert("Failed to reset cobot.");
+    }
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+// Explain Decision (Copilot)
+explainBtn.addEventListener("click", async () => {
+  const textEl = document.getElementById("copilotText");
+  textEl.textContent = "Synthesizing plain-language rationale…";
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/explain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ use_llm: true })
+    });
+    const data = await res.json();
+    textEl.textContent = data.explanation;
+    document.getElementById("copilotMeta").textContent = `Source: ${data.source.toUpperCase()} · Latency <50ms`;
+  } catch (e) {
+    textEl.textContent = "Could not contact explainability engine.";
+  }
+});
+
+// OSHA Incident Report Modal
+oshaReportBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/explain/incident-report`);
+    const rpt = await res.json();
+    document.getElementById("rptId").textContent = rpt.report_metadata.report_id;
+    document.getElementById("rptTime").textContent = rpt.report_metadata.generated_at;
+    document.getElementById("rptWorker").textContent = rpt.subject_privacy.worker_pseudonym;
+    document.getElementById("rptAction").textContent = rpt.orchestration_action.action_enforced;
+    document.getElementById("rptMetrics").textContent = `Fatigue: ${rpt.telemetry_metrics.fatigue_score}/100, Slump: ${rpt.telemetry_metrics.slump_angle_degrees}°`;
+    document.getElementById("rptZone").textContent = rpt.telemetry_metrics.safety_zone_breached;
+    document.getElementById("rptCobot").textContent = rpt.orchestration_action.cobot_dispatched;
+    document.getElementById("rptRationale").textContent = rpt.audit_explanation.summary;
+    oshaModal.style.display = "flex";
+  } catch (e) {
+    alert("Unable to fetch OSHA incident report: " + e.message);
+  }
+});
+closeModalBtn.addEventListener("click", () => oshaModal.style.display = "none");
+document.getElementById("printModalBtn").addEventListener("click", () => window.print());
+
+// --- Interactive Polygon Drawing Tool ---
+let mousePos = null;
+
+function updateVertexBadge() {
+  const n = currentPolygon.length;
+  if (!vertexBadge) return;
+  if (n === 0) {
+    vertexBadge.textContent = "0 vertices (min 3)";
+    vertexBadge.style.background = "rgba(168, 85, 247, 0.2)";
+    vertexBadge.style.color = "var(--purple)";
+    vertexBadge.style.borderColor = "var(--purple)";
+  } else if (n < 3) {
+    vertexBadge.textContent = `${n} vertice${n > 1 ? 's' : ''} (need ${3 - n} more)`;
+    vertexBadge.style.background = "var(--amber-glow)";
+    vertexBadge.style.color = "var(--amber)";
+    vertexBadge.style.borderColor = "var(--amber)";
+  } else {
+    vertexBadge.textContent = `${n} vertices (ready)`;
+    vertexBadge.style.background = "var(--ok-glow)";
+    vertexBadge.style.color = "var(--ok)";
+    vertexBadge.style.borderColor = "var(--ok)";
+  }
+}
+
+drawZoneBtn.addEventListener("click", () => {
+  if (!sessionAuth.token) {
+    showLoginModal("Supervisor login required to define or modify safety polygons.");
+    return;
+  }
+  drawingMode = true;
+  currentPolygon = [];
+  mousePos = null;
+  editorBar.style.display = "flex";
+  drawCanvas.style.display = "block";
+  drawZoneBtn.style.display = "none";
+  
+  // Align canvas resolution with CSS client size to eliminate coordinate scaling blur
+  const rect = drawCanvas.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    drawCanvas.width = rect.width;
+    drawCanvas.height = rect.height;
+  }
+  updateVertexBadge();
+  renderDrawCanvas();
+});
+
+cancelZoneBtn.addEventListener("click", () => {
+  drawingMode = false;
+  currentPolygon = [];
+  mousePos = null;
+  editorBar.style.display = "none";
+  drawCanvas.style.display = "none";
+  drawZoneBtn.style.display = "inline-flex";
+  dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+});
+
+undoZoneBtn.addEventListener("click", () => {
+  if (currentPolygon.length > 0) {
+    currentPolygon.pop();
+    updateVertexBadge();
+    renderDrawCanvas();
+  }
+});
+
+clearZoneBtn.addEventListener("click", () => {
+  currentPolygon = [];
+  mousePos = null;
+  updateVertexBadge();
+  renderDrawCanvas();
+});
+
+drawCanvas.addEventListener("mousemove", (e) => {
+  if (!drawingMode) return;
+  const rect = drawCanvas.getBoundingClientRect();
+  mousePos = [
+    (e.clientX - rect.left) / rect.width,
+    (e.clientY - rect.top) / rect.height
+  ];
+  renderDrawCanvas();
+});
+
+drawCanvas.addEventListener("mouseleave", () => {
+  mousePos = null;
+  if (drawingMode) renderDrawCanvas();
+});
+
+drawCanvas.addEventListener("click", (e) => {
+  if (!drawingMode) return;
+  const rect = drawCanvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+
+  currentPolygon.push([round(x, 3), round(y, 3)]);
+  updateVertexBadge();
+  renderDrawCanvas();
+});
+
+drawCanvas.addEventListener("dblclick", (e) => {
+  e.preventDefault();
+  if (!drawingMode) return;
+  if (currentPolygon.length >= 3) {
+    openSaveZoneModal();
+  }
+});
+
+function renderDrawCanvas() {
+  dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  if (currentPolygon.length === 0 && !mousePos) return;
+
+  const w = drawCanvas.width;
+  const h = drawCanvas.height;
+
+  // 1. Fill polygon if 3+ points
+  if (currentPolygon.length >= 3) {
+    dctx.beginPath();
+    currentPolygon.forEach((pt, i) => {
+      const px = pt[0] * w;
+      const py = pt[1] * h;
+      if (i === 0) dctx.moveTo(px, py);
+      else dctx.lineTo(px, py);
+    });
+    dctx.closePath();
+    dctx.fillStyle = "rgba(168, 85, 247, 0.20)";
+    dctx.fill();
+  }
+
+  // 2. Draw confirmed perimeter edges
+  if (currentPolygon.length > 0) {
+    dctx.beginPath();
+    currentPolygon.forEach((pt, i) => {
+      const px = pt[0] * w;
+      const py = pt[1] * h;
+      if (i === 0) dctx.moveTo(px, py);
+      else dctx.lineTo(px, py);
+    });
+    if (currentPolygon.length >= 3 && !mousePos) {
+      dctx.closePath();
+    }
+    dctx.strokeStyle = "#A855F7";
+    dctx.lineWidth = 2.5;
+    dctx.setLineDash([]);
+    dctx.stroke();
+  }
+
+  // 3. Live rubber-band line from last point to cursor
+  if (drawingMode && mousePos && currentPolygon.length > 0) {
+    const lastPt = currentPolygon[currentPolygon.length - 1];
+    dctx.beginPath();
+    dctx.moveTo(lastPt[0] * w, lastPt[1] * h);
+    dctx.lineTo(mousePos[0] * w, mousePos[1] * h);
+    dctx.strokeStyle = "rgba(168, 85, 247, 0.7)";
+    dctx.lineWidth = 1.5;
+    dctx.setLineDash([4, 4]);
+    dctx.stroke();
+    dctx.setLineDash([]);
+  }
+
+  // 4. Draw vertex handles
+  currentPolygon.forEach((pt, i) => {
+    const px = pt[0] * w;
+    const py = pt[1] * h;
+    dctx.beginPath();
+    dctx.arc(px, py, i === 0 ? 6 : 4.5, 0, Math.PI * 2);
+    // Point 0 highlighted in amber/gold so user sees starting anchor
+    dctx.fillStyle = i === 0 ? "#FFB000" : "#A855F7";
+    dctx.fill();
+    dctx.strokeStyle = "#FFFFFF";
+    dctx.lineWidth = 1.5;
+    dctx.stroke();
+
+    // Vertex index label
+    dctx.font = "bold 10px monospace";
+    dctx.fillStyle = "#FFFFFF";
+    dctx.fillText(`${i + 1}`, px + 6, py - 6);
+  });
+}
+
+function openSaveZoneModal() {
+  if (!sessionAuth.token) {
+    showLoginModal("Supervisor login required to define or save safety zones.");
+    return;
+  }
+  if (currentPolygon.length < 3) {
+    alert("A polygon safety boundary must have at least 3 points.");
+    return;
+  }
+  saveZoneErrorBanner.style.display = "none";
+  modalVertexCount.textContent = `Vertices: ${currentPolygon.length} points`;
+  if (activeZones.length > 0) {
+    zoneNameInput.value = activeZones[0].name || "Robotic Arm Envelope";
+    zoneRiskSelect.value = activeZones[0].risk_tier || "high";
+    zoneSaveModeSelect.value = "replace";
+  } else {
+    zoneNameInput.value = "Robotic Arm Envelope";
+    zoneRiskSelect.value = "high";
+    zoneSaveModeSelect.value = "add";
+  }
+  saveZoneModal.style.display = "flex";
+}
+
+saveZoneBtn.addEventListener("click", openSaveZoneModal);
+
+closeSaveZoneModalBtn.addEventListener("click", () => saveZoneModal.style.display = "none");
+cancelSaveZoneModalBtn.addEventListener("click", () => saveZoneModal.style.display = "none");
+
+saveZoneForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  saveZoneErrorBanner.style.display = "none";
+
+  const zoneName = zoneNameInput.value.trim();
+  const riskTier = zoneRiskSelect.value;
+  const saveMode = zoneSaveModeSelect.value;
+  const changeReason = zoneReasonInput.value.trim() || "Calibrated robot arm reach extension";
+  const colorHex = riskTier === "critical" ? "#E85C4A" : (riskTier === "medium" ? "#FFB000" : "#A855F7");
+
+  try {
+    let res;
+    if (saveMode === "replace" && activeZones.length > 0) {
+      // In-place atomic update: zone remains active continuously
+      res = await fetch(`${API_BASE}/api/v1/zones/${activeZones[0].id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionAuth.token}`
+        },
+        body: JSON.stringify({
+          name: zoneName,
+          risk_tier: riskTier,
+          polygon_coordinates: currentPolygon,
+          color_hex: colorHex,
+          reassignment_eligible: true,
+          change_reason: changeReason
+        })
+      });
+    } else {
+      // Create new zone (atomic replacement if deactivate_previous)
+      res = await fetch(`${API_BASE}/api/v1/zones`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${sessionAuth.token}`
+        },
+        body: JSON.stringify({
+          camera_id: "cam-cell-04",
+          name: zoneName,
+          risk_tier: riskTier,
+          polygon_coordinates: currentPolygon,
+          color_hex: colorHex,
+          reassignment_eligible: true,
+          deactivate_previous: (saveMode === "replace")
+        })
+      });
+    }
+
+    if (res.ok) {
+      saveZoneModal.style.display = "none";
+      await loadSafetyZones();
+      await loadAuditLogs();
+      cancelZoneBtn.click();
+      statusText.textContent = `Safety boundary '${zoneName}' (${currentPolygon.length} vertices) synchronized to engine.`;
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      saveZoneErrorBanner.textContent = errData.detail || "Failed to persist safety zone.";
+      saveZoneErrorBanner.style.display = "block";
+    }
+  } catch (err) {
+    saveZoneErrorBanner.textContent = "Network error: Unable to contact safety API.";
+    saveZoneErrorBanner.style.display = "block";
+  }
+});
+
+function round(val, dec) { return Math.round(val * 10 ** dec) / 10 ** dec; }
+
+
+// Initialize
+startBtn.addEventListener("click", startCamera);
+stopBtn.addEventListener("click", stopCamera);
+loadSafetyZones();
+loadAuditLogs();
+</script>
+
+</body>
+</html>
