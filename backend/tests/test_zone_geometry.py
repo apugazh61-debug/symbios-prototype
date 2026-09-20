@@ -440,3 +440,54 @@ def test_decision_engine_concave_shape_containment_not_bounding_box():
     legacy_inside = check_zones((0.2, 0.6), zones_def)
     assert legacy_inside is not None, "Legacy check_zones must accurately identify inside point"
     assert legacy_inside.label == "L-Bend Robotic Conveyor"
+
+
+def test_zone_reload_atomic_preserves_old_zones_on_malformed_batch():
+    """
+    Critical finding 4.1:
+    Tests that polygon reload is strictly atomic:
+    1. Initial valid zone is loaded and active (worker in zone triggers breach).
+    2. A new batch containing a malformed zone (< 3 vertices or self-intersecting) is submitted.
+    3. load_zones rejects the update and retains the OLD active zones.
+    4. Worker in the original zone is STILL detected (no temporal blind spot or false 'safe' window).
+    """
+    engine = PolygonCollisionEngine()
+    
+    # 1. Initial valid square zone [0.2, 0.2] to [0.8, 0.8]
+    valid_initial = [{
+        "id": "zone-primary",
+        "name": "Primary Hazard Cell",
+        "risk_tier": "critical",
+        "coordinates": [[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]],
+        "reassignment_eligible": True
+    }]
+    engine.load_zones(valid_initial)
+    
+    # Verify worker at (0.5, 0.5) is inside the primary zone
+    initial_check = engine.check_point(0.5, 0.5)
+    assert initial_check is not None
+    assert initial_check.label == "Primary Hazard Cell"
+    
+    # 2. Reload with a batch where one zone is completely malformed (only 2 vertices)
+    corrupted_batch = [
+        {
+            "id": "zone-valid-in-batch",
+            "name": "New Valid Zone",
+            "risk_tier": "high",
+            "coordinates": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.3], [0.1, 0.3]]
+        },
+        {
+            "id": "zone-corrupted",
+            "name": "Corrupted Line",
+            "risk_tier": "critical",
+            "coordinates": [[0.0, 0.0], [0.5, 0.5]]  # Only 2 vertices -> invalid!
+        }
+    ]
+    engine.load_zones(corrupted_batch)
+    
+    # 3. Assert that self._zones was NOT cleared or left empty
+    # The original "Primary Hazard Cell" must still be active!
+    breach = engine.check_point(0.5, 0.5)
+    assert breach is not None, "SAFETY GAP DETECTED: Corrupted batch cleared active zones, creating blind spot!"
+    assert breach.label == "Primary Hazard Cell", "Original zone was not preserved during failed reload"
+

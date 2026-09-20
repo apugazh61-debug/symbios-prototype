@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from core.database import get_db
+from core.security import RoleChecker, UserRole, TokenPayload
 from models.audit import AuditLog
 
 router = APIRouter(prefix="/audit", tags=["Audit Trail & Compliance"])
@@ -71,7 +72,11 @@ def get_audit_logs(limit: int = 50, db: Session = Depends(get_db)):
 
 
 @router.post("/logs", response_model=AuditLogEntryResponse)
-def create_audit_log(entry: AuditLogEntryCreate, db: Session = Depends(get_db)):
+def create_audit_log(
+    entry: AuditLogEntryCreate,
+    token: TokenPayload = Depends(RoleChecker([UserRole.ADMIN, UserRole.SUPERVISOR])),
+    db: Session = Depends(get_db)
+):
     """Persists an audit log event into the relational database."""
     log = record_audit_log(
         db=db,
@@ -81,7 +86,7 @@ def create_audit_log(entry: AuditLogEntryCreate, db: Session = Depends(get_db)):
         entity_type=entry.entity_type,
         entity_id=entry.entity_id,
         changes_json=entry.changes_json,
-        user_email=entry.user_email
+        user_email=token.email or entry.user_email
     )
     db.commit()
     db.refresh(log)

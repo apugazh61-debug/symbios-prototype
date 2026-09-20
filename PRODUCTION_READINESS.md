@@ -221,6 +221,31 @@ logged out. Before deployment:
 
 ---
 
+## 📋 Deferred Safety-Bug-Class Audit Items (Medium & Low)
+
+The following items were identified during the Comprehensive Safety-Bug-Class Audit and deferred for future hardening sprints:
+
+### Category 1: Audit Trail Persistence (Medium / Low)
+- [ ] **Item 1.2 (Medium)**: Persist worker CRUD operations (`POST /api/v1/workers`, `PUT /api/v1/workers/{id}`) to `AuditLog` table on role/credential/station assignment changes.
+- [ ] **Item 1.5 (Low)**: Persist LLM Safety Copilot queries, generated natural-language explanations, and supervisor incident Q&A to `AuditLog`.
+- [ ] **Item 1.6 (Low)**: Persist Camera stream configuration changes (`POST/DELETE /api/v1/cameras`) to `AuditLog`.
+- [ ] **Item 1.7 (Low)**: Persist supervisor real-time acknowledgment/dismissal actions received over WebSocket to `AuditLog`.
+
+### Category 2: Authentication & Authorization (Medium / Low)
+- [ ] **Item 2.3 (Medium)**: Add token-based authentication handshake to WebSocket endpoints (`/ws/telemetry`, `/ws/alerts`) to prevent unauthorized telemetry snooping.
+- [ ] **Item 2.4 (Medium)**: Require mTLS or service-account API key authentication on `POST /api/v1/decisions/analyze_frame` to prevent unauthorized synthetic frame injections.
+- [ ] **Item 2.5 (Low)**: Restrict read-only inspection endpoints (`GET /api/v1/workers`, `GET /api/v1/cobots`) to authenticated roles (`OPERATOR`, `SUPERVISOR`, `ADMIN`).
+
+### Category 3: Multi-Entity Loops & Aggregation (Medium / Low)
+- [ ] **Item 3.4 (Medium)**: Ensure health-check and dashboard metric calculations gracefully handle worker states with missing or `None` coordinates without skewing safety averages.
+- [ ] **Item 3.5 (Low)**: In safety zone geometry validation, report all pairwise overlapping or invalid polygons in a single pass rather than failing on the first detected conflict.
+
+### Category 4: Partial Writes, Concurrency & Fail-Safe State (Medium / Low)
+- [ ] **Item 4.3 (Medium)**: Implement exponential backoff and persistent retry queue for alert escalation tasks during transient database connection drops.
+- [ ] **Item 4.4 (Low)**: Introduce distributed pub/sub cache invalidation (Redis) for in-memory active alert caches when running in a multi-replica deployment.
+
+---
+
 ## Summary Table
 
 | Gap | Severity | Blocks Deployment? |

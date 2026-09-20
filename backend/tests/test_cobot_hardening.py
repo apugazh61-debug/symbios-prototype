@@ -657,4 +657,354 @@ class TestDecisionDispatchGuards:
             global_scheduler.reset_to_idle("cobot-cell-01")
             db.close()
 
+    @pytest.mark.asyncio
+    async def test_decision_log_records_actual_triggering_worker_not_first_worker(self):
+        """
+        Critical finding 3.1:
+        When two workers are tracked in a single frame:
+        - Worker #1: Safe (fatigue=5.0, in_zone=False, slump=2.0) -> NORMAL
+        - Worker #2: Hazard breach (fatigue=85.0, in_zone=True, slump=25.0) -> REASSIGN/CRITICAL
+        DecisionLog.worker_id MUST be 'W-HAZARD-02', never mistakenly hardcoded to worker_states[0] ('W-SAFE-01').
+        """
+        from api.v1.decisions import analyze_frame
+        from schemas.safety import FrameAnalysisRequest
+        from models.decision import DecisionLog
+        from engine.interface import CobotContext
+        from unittest.mock import patch, AsyncMock
+        import numpy as np
+
+        db = SessionLocal()
+        try:
+            mock_workers = [
+                {
+                    "worker_id": "W-SAFE-01",
+                    "center_norm": [0.2, 0.2],
+                    "fatigue_score": 5.0,
+                    "slump_angle": 2.0,
+                    "stillness_seconds": 1.0,
+                    "in_zone": False,
+                    "zone_name": None,
+                    "zone_risk": None,
+                    "reassignment_eligible": False,
+                    "bbox": [10, 10, 40, 40],
+                    "keypoints": []
+                },
+                {
+                    "worker_id": "W-HAZARD-02",
+                    "center_norm": [0.8, 0.8],
+                    "fatigue_score": 85.0,
+                    "slump_angle": 25.0,
+                    "stillness_seconds": 7.0,
+                    "in_zone": True,
+                    "zone_name": "Robotic Arm Envelope",
+                    "zone_risk": "high",
+                    "reassignment_eligible": True,
+                    "bbox": [50, 50, 90, 90],
+                    "keypoints": []
+                }
+            ]
+
+            req = FrameAnalysisRequest(
+                image_base64="data:image/jpeg;base64,fakeimage",
+                camera_id="cam-01"
+            )
+
+            idle_ctx = CobotContext(
+                available_cobot_id="cobot-cell-01",
+                cobot_name="UR10e-Arm-North",
+                cobot_status="IDLE"
+            )
+
+            with patch("api.v1.decisions.decode_image_frame", return_value=np.zeros((50, 50, 3), dtype=np.uint8)), \
+                 patch("api.v1.decisions.pipeline.process_frame", return_value=mock_workers), \
+                 patch("api.v1.decisions.cobot_scheduler.get_context", return_value=idle_ctx), \
+                 patch("api.v1.decisions.alert_dispatcher.dispatch_critical_alert", new_callable=AsyncMock):
+
+                resp = await analyze_frame(req=req, db=db)
+
+                assert resp.active_decision is not None
+                decision_log_id = resp.active_decision.decision_log_id
+                assert decision_log_id is not None
+
+                # Query the persisted DecisionLog
+                log_row = db.query(DecisionLog).filter(DecisionLog.id == decision_log_id).first()
+                assert log_row is not None
+                assert log_row.worker_id == "W-HAZARD-02", (
+                    f"DecisionLog misattributed worker_id to '{log_row.worker_id}' instead of 'W-HAZARD-02'!"
+                )
+                assert log_row.slump_angle == 25.0
+                assert log_row.fatigue_score == 85.0
+        finally:
+            global_scheduler.reset_to_idle("cobot-cell-01")
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_multi_worker_concurrent_hazard_creates_decision_and_alert_for_all(self):
+        """
+        High finding 3.2:
+        When multiple workers experience hazards concurrently in the same frame:
+        - Worker 1 (W-WARN-01): Severe fatigue in safe zone (fatigue=75.0) -> MONITOR/warning
+        - Worker 2 (W-CRIT-02): Severe fatigue in hazard zone (fatigue=88.0) -> REASSIGN/critical
+        Verify that DecisionLog and SafetyAlert rows are created for BOTH workers.
+        """
+        from api.v1.decisions import analyze_frame
+        from schemas.safety import FrameAnalysisRequest
+        from models.decision import DecisionLog
+        from models.alert import SafetyAlert
+        from engine.interface import CobotContext
+        from unittest.mock import patch, AsyncMock
+        import numpy as np
+
+        db = SessionLocal()
+        try:
+            mock_workers = [
+                {
+                    "worker_id": "W-WARN-01",
+                    "center_norm": [0.2, 0.2],
+                    "fatigue_score": 75.0,
+                    "slump_angle": 20.0,
+                    "stillness_seconds": 6.0,
+                    "in_zone": False,
+                    "zone_name": None,
+                    "zone_risk": None,
+                    "reassignment_eligible": False,
+                    "bbox": [10, 10, 40, 40],
+                    "keypoints": []
+                },
+                {
+                    "worker_id": "W-CRIT-02",
+                    "center_norm": [0.8, 0.8],
+                    "fatigue_score": 88.0,
+                    "slump_angle": 28.0,
+                    "stillness_seconds": 8.0,
+                    "in_zone": True,
+                    "zone_name": "Robotic Arm Envelope",
+                    "zone_risk": "high",
+                    "reassignment_eligible": True,
+                    "bbox": [50, 50, 90, 90],
+                    "keypoints": []
+                }
+            ]
+
+            req = FrameAnalysisRequest(
+                image_base64="data:image/jpeg;base64,fakeimage",
+                camera_id="cam-01"
+            )
+
+            idle_ctx = CobotContext(
+                available_cobot_id="cobot-cell-01",
+                cobot_name="UR10e-Arm-North",
+                cobot_status="IDLE"
+            )
+
+            with patch("api.v1.decisions.decode_image_frame", return_value=np.zeros((50, 50, 3), dtype=np.uint8)), \
+                 patch("api.v1.decisions.pipeline.process_frame", return_value=mock_workers), \
+                 patch("api.v1.decisions.cobot_scheduler.get_context", return_value=idle_ctx), \
+                 patch("api.v1.decisions.alert_dispatcher.dispatch_critical_alert", new_callable=AsyncMock):
+
+                resp = await analyze_frame(req=req, db=db)
+                assert resp.active_decision is not None
+
+                # Query DecisionLogs for both workers
+                w1_logs = db.query(DecisionLog).filter(DecisionLog.worker_id == "W-WARN-01").all()
+                w2_logs = db.query(DecisionLog).filter(DecisionLog.worker_id == "W-CRIT-02").all()
+
+                assert len(w1_logs) >= 1, "Concurrent hazard for W-WARN-01 was dropped from DecisionLog!"
+                assert len(w2_logs) >= 1, "DecisionLog missing for W-CRIT-02!"
+
+                # Query SafetyAlerts tied to these decision logs
+                relevant_log_ids = [l.id for l in w1_logs + w2_logs]
+                alerts = db.query(SafetyAlert).filter(SafetyAlert.decision_log_id.in_(relevant_log_ids)).all()
+                alert_messages = [a.message for a in alerts]
+
+                assert any("W-WARN-01" in m for m in alert_messages), "SafetyAlert missing for W-WARN-01!"
+                assert any("Task reallocated" in m or "W-CRIT-02" in m for m in alert_messages), "SafetyAlert missing for W-CRIT-02!"
+        finally:
+            global_scheduler.reset_to_idle("cobot-cell-01")
+            db.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Q8 Dedicated tests for Audit HIGH items (4.2, 3.3, 4.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAuditHighItemsVerifications:
+    """
+    Dedicated tests verifying HIGH audit items:
+    - 4.2: DB commit failure during state transition triggers rollback and reverts scheduler state.
+    - 3.3: legacy_analyze_frame prioritizes critical worker over normal worker at index 0.
+    - 4.5: legacy_analyze_frame guarantees db.close() in finally block on error.
+    """
+
+    @pytest.mark.asyncio
+    async def test_4_2_db_commit_failure_reverts_scheduler_and_rolls_back(self):
+        """
+        4.2: When DB commit fails during cobot state transition,
+        verify DB rollback is executed AND in-memory cobot status reverts to IDLE.
+        """
+        from api.v1.decisions import analyze_frame
+        from schemas.safety import FrameAnalysisRequest
+        from engine.interface import CobotContext
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from core.database import SessionLocal
+        from engine.cobot_scheduler import cobot_scheduler as global_scheduler
+        from models.cobot import CobotStatus
+        import numpy as np
+
+        db = SessionLocal()
+        cid = "cobot-cell-01"
+        global_scheduler.reset_to_idle(cid)
+        assert global_scheduler.get_status(cid).status == CobotStatus.IDLE.value
+
+        mock_workers = [
+            {
+                "worker_id": "W-CRIT-99",
+                "center_norm": [0.8, 0.8],
+                "fatigue_score": 90.0,
+                "slump_angle": 30.0,
+                "stillness_seconds": 10.0,
+                "in_zone": True,
+                "zone_name": "Robotic Arm Envelope",
+                "zone_risk": "high",
+                "reassignment_eligible": True,
+                "bbox": [50, 50, 90, 90],
+                "keypoints": []
+            }
+        ]
+
+        req = FrameAnalysisRequest(
+            image_base64="data:image/jpeg;base64,fakeimage",
+            camera_id="cam-01"
+        )
+
+        idle_ctx = CobotContext(
+            available_cobot_id=cid,
+            cobot_name="UR10e-Arm-North",
+            cobot_status="IDLE"
+        )
+
+        # Mock db.rollback spy and db.commit to raise
+        rollback_spy = MagicMock(side_effect=db.rollback)
+        db.rollback = rollback_spy
+
+        def commit_fail():
+            raise RuntimeError("Simulated DB commit error (disk/network failure)")
+
+        db.commit = MagicMock(side_effect=commit_fail)
+
+        try:
+            with patch("api.v1.decisions.decode_image_frame", return_value=np.zeros((50, 50, 3), dtype=np.uint8)), \
+                 patch("api.v1.decisions.pipeline.process_frame", return_value=mock_workers), \
+                 patch("api.v1.decisions.cobot_scheduler.get_context", return_value=idle_ctx), \
+                 patch("api.v1.decisions.alert_dispatcher.dispatch_critical_alert", new_callable=AsyncMock):
+
+                with pytest.raises(RuntimeError, match="Simulated DB commit error"):
+                    await analyze_frame(req=req, db=db)
+
+            # Confirm rollback was invoked
+            assert rollback_spy.called, "db.rollback was NOT called on commit error!"
+
+            # Confirm in-memory scheduler state was reverted to IDLE (not stuck in ASSIGNED)
+            assert global_scheduler.get_status(cid).status == CobotStatus.IDLE.value, \
+                f"Scheduler status remained '{global_scheduler.get_status(cid).status}' instead of reverting to IDLE!"
+        finally:
+            global_scheduler.reset_to_idle(cid)
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_3_3_legacy_analyze_frame_returns_critical_worker_not_first(self):
+        """
+        3.3: legacy_analyze_frame with two workers (worker[0] normal, worker[1] critical)
+        must return worker[1]'s high fatigue data rather than worker[0]'s.
+        """
+        from main import legacy_analyze_frame
+        from schemas.safety import FrameAnalysisRequest
+        from engine.interface import CobotContext
+        from unittest.mock import patch, AsyncMock
+        from core.database import SessionLocal
+        import numpy as np
+
+        db = SessionLocal()
+        try:
+            mock_workers = [
+                {
+                    "worker_id": "W-SAFE-01",
+                    "center_norm": [0.1, 0.1],
+                    "fatigue_score": 12.0,
+                    "slump_angle": 2.0,
+                    "stillness_seconds": 1.0,
+                    "in_zone": False,
+                    "zone_name": None,
+                    "zone_risk": None,
+                    "reassignment_eligible": False,
+                    "bbox": [10, 10, 30, 30],
+                    "keypoints": []
+                },
+                {
+                    "worker_id": "W-CRIT-02",
+                    "center_norm": [0.85, 0.85],
+                    "fatigue_score": 94.0,
+                    "slump_angle": 32.0,
+                    "stillness_seconds": 12.0,
+                    "in_zone": True,
+                    "zone_name": "Robotic Arm Envelope",
+                    "zone_risk": "high",
+                    "reassignment_eligible": True,
+                    "bbox": [60, 60, 95, 95],
+                    "keypoints": []
+                }
+            ]
+
+            req = FrameAnalysisRequest(
+                image_base64="data:image/jpeg;base64,fakeimage",
+                camera_id="cam-01"
+            )
+
+            idle_ctx = CobotContext(
+                available_cobot_id="cobot-cell-01",
+                cobot_name="UR10e-Arm-North",
+                cobot_status="IDLE"
+            )
+
+            with patch("api.v1.decisions.decode_image_frame", return_value=np.zeros((50, 50, 3), dtype=np.uint8)), \
+                 patch("api.v1.decisions.pipeline.process_frame", return_value=mock_workers), \
+                 patch("api.v1.decisions.cobot_scheduler.get_context", return_value=idle_ctx), \
+                 patch("api.v1.decisions.alert_dispatcher.dispatch_critical_alert", new_callable=AsyncMock):
+
+                result = await legacy_analyze_frame(frame=req, db=db)
+
+            assert result["person_detected"] is True
+            # Must return W-CRIT-02's data (fatigue 94.0, center [0.85, 0.85]), NOT worker[0]'s (12.0, [0.1, 0.1])
+            assert result["fatigue_score"] == 94.0, f"Expected 94.0 but got {result['fatigue_score']}"
+            assert result["center_norm"] == [0.85, 0.85], f"Expected [0.85, 0.85] but got {result['center_norm']}"
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_4_5_legacy_analyze_frame_closes_db_session_on_exception(self):
+        """
+        4.5: When an exception occurs during frame processing,
+        confirm db.close() is guaranteed to execute via the finally block.
+        """
+        from main import legacy_analyze_frame
+        from schemas.safety import FrameAnalysisRequest
+        from unittest.mock import patch, MagicMock
+
+        req = FrameAnalysisRequest(
+            image_base64="data:image/jpeg;base64,fakeimage",
+            camera_id="cam-01"
+        )
+
+        mock_db = MagicMock()
+
+        with patch("main.v1_analyze_frame", side_effect=ValueError("Simulated pipeline fatal crash")):
+            with pytest.raises(ValueError, match="Simulated pipeline fatal crash"):
+                await legacy_analyze_frame(frame=req, db=mock_db)
+
+        # Confirm db.close() was called in finally block despite the exception
+        assert mock_db.close.called, "db.close() was NOT called in finally block upon exception!"
+
+
+
+
 

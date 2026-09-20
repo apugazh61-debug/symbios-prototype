@@ -19,13 +19,40 @@ def client():
         yield c
 
 
+from core.security import get_bootstrap_supervisor_password, get_bootstrap_admin_password
+
+
+def get_supervisor_auth_headers(client):
+    """Helper to authenticate as supervisor and return valid Authorization Bearer headers."""
+    res = client.post(
+        "/api/v1/auth/token",
+        data={"username": "supervisor@symbios.ai", "password": get_bootstrap_supervisor_password()}
+    )
+    assert res.status_code == 200, res.text
+    token = res.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def get_admin_auth_headers(client):
+    """Helper to authenticate as admin and return valid Authorization Bearer headers."""
+    res = client.post(
+        "/api/v1/auth/token",
+        data={"username": "admin@symbios.ai", "password": get_bootstrap_admin_password()}
+    )
+    assert res.status_code == 200, res.text
+    token = res.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_audit_log_post_and_get(client):
+    headers = get_supervisor_auth_headers(client)
     test_id = str(uuid.uuid4())[:8]
     test_message = f"EHS automated test event verification {test_id}"
     
-    # 1. Post audit log via API
+    # 1. Post audit log via API with valid supervisor credentials
     post_res = client.post(
         "/api/v1/audit/logs",
+        headers=headers,
         json={
             "action": "SAFETY_INSPECTION",
             "entity_type": "AssemblyCell",
@@ -50,10 +77,12 @@ def test_audit_log_post_and_get(client):
 
 
 def test_audit_log_survives_new_database_session(client):
+    headers = get_supervisor_auth_headers(client)
     unique_msg = f"Permanent disk persistence test {uuid.uuid4().hex[:8]}"
     
     post_res = client.post(
         "/api/v1/audit/logs",
+        headers=headers,
         json={
             "action": "COBOT_DISPATCH",
             "entity_type": "UR10e",
@@ -111,20 +140,6 @@ def test_decision_events_auto_logged_exactly_once(client):
         db.close()
 
 
-from core.security import get_bootstrap_supervisor_password
-
-
-def get_supervisor_auth_headers(client):
-    """Helper to authenticate as supervisor and return valid Authorization Bearer headers."""
-    res = client.post(
-        "/api/v1/auth/token",
-        data={"username": "supervisor@symbios.ai", "password": get_bootstrap_supervisor_password()}
-    )
-    assert res.status_code == 200, res.text
-    token = res.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
 def test_unauthenticated_requests_rejected_with_401_no_audit_log(client):
     """
     Requirement 2 & 3:
@@ -159,14 +174,73 @@ def test_unauthenticated_requests_rejected_with_401_no_audit_log(client):
     )
     assert zone_update_res.status_code == 401, f"Expected 401, got {zone_update_res.status_code}"
 
-    # 4. Verify that NO audit logs were written for any of these unauthorized attempts
+    # 4. Post audit log without token
+    unauth_audit_msg = f"Forged audit attempt {uuid.uuid4().hex[:8]}"
+    audit_res = client.post(
+        "/api/v1/audit/logs",
+        json={
+            "action": "FORGED_EVENT",
+            "entity_type": "System",
+            "severity": "critical",
+            "message": unauth_audit_msg
+        }
+    )
+    assert audit_res.status_code == 401, f"Expected 401, got {audit_res.status_code}"
+
+    # 5. Verify that NO audit logs were written for any of these unauthorized attempts
     db = SessionLocal()
     try:
         rogue_logs = db.query(AuditLog).filter(
             (AuditLog.message.like("%Unauthorized%")) |
-            (AuditLog.action.in_(["CREATE_SAFETY_ZONE", "UPDATE_SAFETY_ZONE", "COBOT_RESET"]) & (AuditLog.user_email == None))
+            (AuditLog.message == unauth_audit_msg) |
+            (AuditLog.action.in_(["CREATE_SAFETY_ZONE", "UPDATE_SAFETY_ZONE", "COBOT_RESET", "FORGED_EVENT"]) & (AuditLog.user_email == None))
         ).all()
         assert len(rogue_logs) == 0, f"Found unauthenticated audit logs: {rogue_logs}"
+    finally:
+        db.close()
+
+
+def test_auth_register_requires_admin_role(client):
+    """
+    Critical finding 2.1:
+    POST /auth/register must require ADMIN role.
+    Unauthenticated -> 401
+    Supervisor -> 403
+    Admin -> 201 Created and AuditLog recorded.
+    """
+    unique_user = f"newworker_{uuid.uuid4().hex[:6]}@symbios.ai"
+    reg_payload = {
+        "email": unique_user,
+        "password": "SecurePassword123!",
+        "full_name": "New Safety Operator",
+        "role": "supervisor"
+    }
+
+    # 1. Unauthenticated -> 401
+    unauth_res = client.post("/api/v1/auth/register", json=reg_payload)
+    assert unauth_res.status_code == 401, unauth_res.text
+
+    # 2. Authenticated as Supervisor (not Admin) -> 403 Forbidden
+    sup_headers = get_supervisor_auth_headers(client)
+    sup_res = client.post("/api/v1/auth/register", headers=sup_headers, json=reg_payload)
+    assert sup_res.status_code == 403, f"Expected 403 for supervisor, got {sup_res.status_code}"
+
+    # 3. Authenticated as Admin -> 201 Created
+    admin_headers = get_admin_auth_headers(client)
+    admin_res = client.post("/api/v1/auth/register", headers=admin_headers, json=reg_payload)
+    assert admin_res.status_code == 201, admin_res.text
+    created_data = admin_res.json()
+    assert created_data["email"] == unique_user
+
+    # Verify immutable AuditLog record created for account provisioning
+    db = SessionLocal()
+    try:
+        audit = db.query(AuditLog).filter(
+            AuditLog.action == "CREATE_USER_ACCOUNT",
+            AuditLog.entity_id == created_data["id"]
+        ).first()
+        assert audit is not None, "AuditLog entry missing for admin user registration"
+        assert audit.user_email == "admin@symbios.ai"
     finally:
         db.close()
 
@@ -342,4 +416,104 @@ def test_frontend_credential_hygiene_and_in_memory_session():
             # 3. Verify no storage of auth token in persistent browser storage
             storage_usage = re.search(r'(?:localStorage|sessionStorage)\.setItem\([^)]*token', content, re.IGNORECASE)
             assert storage_usage is None, f"Token stored in persistent storage in {file_path.name}"
+
+
+def test_deactivate_safety_zone_records_audit_log(client):
+    """
+    High finding 1.1:
+    Deactivating a safety zone (DELETE /api/v1/zones/{id}) must record
+    an immutable AuditLog entry so boundary modifications cannot happen silently.
+    """
+    admin_headers = get_admin_auth_headers(client)
+
+    # 1. Create a zone to deactivate
+    create_res = client.post(
+        "/api/v1/zones",
+        headers=admin_headers,
+        json={
+            "camera_id": "cam-cell-04",
+            "name": f"Temporary Zone {uuid.uuid4().hex[:6]}",
+            "risk_tier": "high",
+            "polygon_coordinates": [[0.3, 0.3], [0.5, 0.3], [0.5, 0.5], [0.3, 0.5]],
+            "color_hex": "#FFAA00",
+            "reassignment_eligible": True
+        }
+    )
+    assert create_res.status_code == 201, create_res.text
+    zone_id = create_res.json()["id"]
+
+    # 2. Deactivate it
+    del_res = client.delete(f"/api/v1/zones/{zone_id}", headers=admin_headers)
+    assert del_res.status_code == 204, del_res.text
+
+    # 3. Confirm immutable audit log was persisted
+    db = SessionLocal()
+    try:
+        audit = db.query(AuditLog).filter(
+            AuditLog.action == "DEACTIVATE_SAFETY_ZONE",
+            AuditLog.entity_id == zone_id
+        ).first()
+        assert audit is not None, "AuditLog entry missing for DEACTIVATE_SAFETY_ZONE"
+        assert audit.severity == "warning"
+        assert audit.user_email == "admin@symbios.ai"
+    finally:
+        db.close()
+
+
+def test_alert_escalation_records_audit_log():
+    """
+    High finding 1.3:
+    When an unacknowledged alert is escalated by the background escalation daemon,
+    an immutable AuditLog entry must be recorded alongside the AlertEscalation record.
+    """
+    from datetime import datetime, timezone, timedelta
+    from models.decision import DecisionLog
+    from models.alert import SafetyAlert
+    from alerting.escalation import escalation_daemon
+    from core.config import settings
+
+    db = SessionLocal()
+    try:
+        # Create decision log and an alert older than ALERT_ESCALATION_MINUTES
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=settings.ALERT_ESCALATION_MINUTES + 1)
+        dlog = DecisionLog(
+            site_id="site-detroit-01",
+            camera_id="cam-cell-04",
+            action_taken="CRITICAL_BREACH",
+            severity="critical",
+            rule_fired="RULE_CRITICAL_ZONE_BREACH_ESTOP",
+            fatigue_score=85.0
+        )
+        db.add(dlog)
+        db.flush()
+
+        alert = SafetyAlert(
+            decision_log_id=dlog.id,
+            site_id="site-detroit-01",
+            title=f"Test Unacknowledged Alert {uuid.uuid4().hex[:6]}",
+            message="Worker collapsed in hazard envelope.",
+            severity="critical",
+            acknowledged=False,
+            escalation_level=0,
+            created_at=old_time
+        )
+        db.add(alert)
+        db.commit()
+        db.refresh(alert)
+        alert_id = alert.id
+
+        # Trigger daemon check
+        escalation_daemon.check_unacknowledged_alerts()
+
+        # Verify audit log was recorded
+        audit = db.query(AuditLog).filter(
+            AuditLog.action == "ALERT_ESCALATION_DISPATCHED",
+            AuditLog.entity_id == alert_id
+        ).first()
+        assert audit is not None, "AuditLog entry missing for ALERT_ESCALATION_DISPATCHED"
+        assert audit.severity == "critical"
+        assert "Escalated to EHS Duty Supervisor" in audit.message
+    finally:
+        db.close()
+
 

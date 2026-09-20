@@ -297,16 +297,29 @@ def legacy_zones(db=Depends(SessionLocal)):
 @app.post("/analyze_frame", tags=["Compatibility"])
 async def legacy_analyze_frame(frame: FrameAnalysisRequest, db=Depends(SessionLocal)):
     """Legacy analyze route mapping to new pipeline."""
-    res = await v1_analyze_frame(frame, db)
-    db.close()
+    try:
+        res = await v1_analyze_frame(frame, db)
+    finally:
+        db.close()
+
     if not res.person_detected:
         return {"person_detected": False}
-    
-    first_worker = res.tracked_workers[0] if res.tracked_workers else None
+
+    # Pick the highest-risk worker rather than blindly tracked_workers[0]
+    # so a fatigued or in-zone worker is never dropped if another worker is index 0
+    target_worker = None
+    if res.tracked_workers:
+        sorted_workers = sorted(
+            res.tracked_workers,
+            key=lambda w: (1 if w.in_zone else 0, w.fatigue_score),
+            reverse=True
+        )
+        target_worker = sorted_workers[0]
+
     return {
         "person_detected": True,
-        "fatigue_score": first_worker.fatigue_score if first_worker else 0.0,
-        "center_norm": first_worker.center_norm if first_worker else [0.5, 0.5],
+        "fatigue_score": target_worker.fatigue_score if target_worker else 0.0,
+        "center_norm": target_worker.center_norm if target_worker else [0.5, 0.5],
         "decision": res.active_decision.dict() if res.active_decision else {}
     }
 

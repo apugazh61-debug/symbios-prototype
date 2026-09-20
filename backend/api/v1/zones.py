@@ -281,9 +281,27 @@ def deactivate_safety_zone(
     token: TokenPayload = Depends(RoleChecker([UserRole.ADMIN])),
     db: Session = Depends(get_db)
 ):
-    """Soft deletes/deactivates safety zone."""
+    """Soft deletes/deactivates safety zone with immutable audit trail."""
     zone = db.query(SafetyZone).filter(SafetyZone.id == zone_id).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Safety zone not found")
     zone.is_active = False
+
+    audit = AuditLog(
+        user_id=token.sub,
+        user_email=token.email,
+        action="DEACTIVATE_SAFETY_ZONE",
+        entity_type="SafetyZone",
+        entity_id=zone.id,
+        severity="warning",
+        message=f"Admin '{token.email}' deactivated safety zone '{zone.name}' (id: {zone.id}).",
+        changes_json=json.dumps({
+            "zone_id": zone.id,
+            "zone_name": zone.name,
+            "previous_active": True,
+            "is_active": False,
+            "deactivated_by": token.email
+        })
+    )
+    db.add(audit)
     db.commit()

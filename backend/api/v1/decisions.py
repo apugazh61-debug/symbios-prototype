@@ -130,6 +130,8 @@ async def analyze_frame(req: FrameAnalysisRequest, db: Session = Depends(get_db)
     # 4. Evaluate highest risk decision across all tracked workers
     worker_states: List[TrackedWorkerState] = []
     highest_priority_decision: Optional[DecisionPayload] = None
+    triggering_worker_state: Optional[TrackedWorkerState] = None
+    evaluated_workers: List[dict] = []
     priority_map = {"critical": 3, "warning": 2, "info": 1}
 
     # Retrieve current cobot context
@@ -235,30 +237,40 @@ async def analyze_frame(req: FrameAnalysisRequest, db: Session = Depends(get_db)
             latency_ms=latency_ms
         )
 
+        evaluated_workers.append({
+            "payload": payload,
+            "worker_state": ws,
+            "cobot_assigned_name": cobot_assigned_name
+        })
+
         if (highest_priority_decision is None or
                 priority_map.get(payload.severity, 0) > priority_map.get(highest_priority_decision.severity, 0)):
             highest_priority_decision = payload
+            triggering_worker_state = ws
 
     # 5. Persist decision log to database
-    if highest_priority_decision:
+    if highest_priority_decision and triggering_worker_state:
         cam_id = req.camera_id or (db_zones[0].camera_id if db_zones else "default-cam-01")
         site_id = db_zones[0].site_id if db_zones else "default-site-01"
 
         log_entry = DecisionLog(
             site_id=site_id,
             camera_id=cam_id,
-            worker_id=worker_states[0].worker_id if worker_states else None,
+            worker_id=triggering_worker_state.worker_id,
             zone_id=None,
             fatigue_score=highest_priority_decision.fatigue_score,
-            slump_angle=worker_states[0].slump_angle if worker_states else 0.0,
-            stillness_seconds=worker_states[0].stillness_seconds if worker_states else 0.0,
+            slump_angle=triggering_worker_state.slump_angle,
+            stillness_seconds=triggering_worker_state.stillness_seconds,
             in_zone=highest_priority_decision.in_zone,
             action_taken=highest_priority_decision.action.value,
             severity=highest_priority_decision.severity,
             rule_fired=highest_priority_decision.rule_fired,
             engine_version="rule_v1",
             execution_latency_ms=highest_priority_decision.latency_ms,
-            raw_metrics_json=json.dumps({"worker_count": len(worker_states)})
+            raw_metrics_json=json.dumps({
+                "worker_count": len(worker_states),
+                "triggering_worker_id": triggering_worker_state.worker_id
+            })
         )
         db.add(log_entry)
         db.flush()  # Generates log_entry.id for FK references below
@@ -370,7 +382,77 @@ async def analyze_frame(req: FrameAnalysisRequest, db: Session = Depends(get_db)
             })
         # ── End dispatch failure handling ─────────────────────────────────────────
 
-        db.commit()
+        # ── Concurrent worker hazard logging: log all workers with warning/critical ───
+        for ev in evaluated_workers:
+            other_ws = ev["worker_state"]
+            other_payload = ev["payload"]
+            # Skip the primary worker already persisted as highest_priority_decision
+            if other_ws.worker_id == triggering_worker_state.worker_id:
+                continue
+            if other_payload.severity in ["warning", "critical"]:
+                other_log = DecisionLog(
+                    site_id=site_id,
+                    camera_id=cam_id,
+                    worker_id=other_ws.worker_id,
+                    zone_id=None,
+                    fatigue_score=other_payload.fatigue_score,
+                    slump_angle=other_ws.slump_angle,
+                    stillness_seconds=other_ws.stillness_seconds,
+                    in_zone=other_payload.in_zone,
+                    action_taken=other_payload.action.value,
+                    severity=other_payload.severity,
+                    rule_fired=other_payload.rule_fired,
+                    engine_version="rule_v1",
+                    execution_latency_ms=other_payload.latency_ms,
+                    raw_metrics_json=json.dumps({
+                        "worker_count": len(worker_states),
+                        "worker_id": other_ws.worker_id,
+                        "concurrent_hazard": True
+                    })
+                )
+                db.add(other_log)
+                db.flush()
+
+                other_action_desc = other_payload.action.value.replace('_', ' ')
+                other_msg = (
+                    f"{other_action_desc} enforced: Worker {other_ws.worker_id}, "
+                    f"Fatigue {other_payload.fatigue_score:.1f}/100, "
+                    f"Zone: {other_payload.zone_label or 'None'}"
+                )
+                other_alert = SafetyAlert(
+                    decision_log_id=other_log.id,
+                    site_id=site_id,
+                    title=f"{other_action_desc} Detected ({other_ws.worker_id})",
+                    message=other_msg,
+                    severity=other_payload.severity,
+                    acknowledged=False
+                )
+                db.add(other_alert)
+
+                other_audit = AuditLog(
+                    action=f"DECISION_{other_payload.action.value}",
+                    entity_type="DecisionLog",
+                    entity_id=other_log.id,
+                    severity=other_payload.severity,
+                    message=other_msg,
+                    changes_json=json.dumps({
+                        "worker_id": other_ws.worker_id,
+                        "action": other_payload.action.value,
+                        "rule": other_payload.rule_fired,
+                        "fatigue": other_payload.fatigue_score,
+                        "in_zone": other_payload.in_zone
+                    })
+                )
+                db.add(other_audit)
+
+        try:
+            db.commit()
+        except Exception as commit_err:
+            db.rollback()
+            logger.error(f"[Decisions] Database commit failed: {commit_err}. Reverting cobot assignment.")
+            if highest_priority_decision.cobot_reassigned and cobot_ctx.available_cobot_id:
+                cobot_scheduler.reset_to_idle(cobot_ctx.available_cobot_id)
+            raise
 
         highest_priority_decision.decision_log_id = log_entry.id
 

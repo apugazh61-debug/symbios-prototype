@@ -11,6 +11,7 @@ from core.logging import logger
 from core.config import settings
 from core.database import SessionLocal
 from models.alert import SafetyAlert, AlertEscalation
+from models.audit import AuditLog
 
 
 class EscalationDaemon:
@@ -41,10 +42,11 @@ class EscalationDaemon:
             ).all()
 
             for alert in unacked:
-                logger.warning(
+                escalation_msg = (
                     f"ESCALATION: Safety Alert {alert.id} ('{alert.title}') unacknowledged for > "
-                    f"{settings.ALERT_ESCALATION_MINUTES} mins. Escalating to EHS Manager."
+                    f"{settings.ALERT_ESCALATION_MINUTES} mins. Escalated to EHS Duty Supervisor via SMS_PAGER."
                 )
+                logger.warning(escalation_msg)
                 alert.escalation_level += 1
                 escalation = AlertEscalation(
                     alert_id=alert.id,
@@ -53,6 +55,17 @@ class EscalationDaemon:
                     status="DISPATCHED"
                 )
                 db.add(escalation)
+
+                # Persist immutable compliance audit entry
+                audit_entry = AuditLog(
+                    action="ALERT_ESCALATION_DISPATCHED",
+                    entity_type="SafetyAlert",
+                    entity_id=alert.id,
+                    severity="warning" if alert.severity != "critical" else "critical",
+                    message=escalation_msg,
+                    changes_json=f'{{"alert_id": "{alert.id}", "new_escalation_level": {alert.escalation_level}, "channel": "SMS_PAGER"}}'
+                )
+                db.add(audit_entry)
 
             db.commit()
         finally:

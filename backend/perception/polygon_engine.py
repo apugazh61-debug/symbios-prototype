@@ -8,6 +8,7 @@ Supports arbitrary N-sided polygons, point-in-polygon tests, and proximity safet
 from typing import List, Tuple, Optional, Dict, Any
 from shapely.geometry import Point, Polygon
 from shapely.validation import make_valid
+from core.logging import logger
 
 
 class SafetyPolygon:
@@ -45,8 +46,14 @@ class PolygonCollisionEngine:
         self._zones: Dict[str, SafetyPolygon] = {}
 
     def load_zones(self, zone_definitions: List[Dict[str, Any]]):
-        """Replaces active zones with new definitions."""
-        self._zones.clear()
+        """
+        Replaces active zones with new definitions atomically.
+        Does NOT clear or mutate self._zones until the new zone set has been fully
+        parsed and validated. If parsing fails partway (e.g. malformed polygon
+        coordinates or bad geometry in the batch), keeps the OLD zone set active
+        rather than leaving zones empty, guaranteeing zero temporal blind spots.
+        """
+        new_zones: Dict[str, SafetyPolygon] = {}
         for z in zone_definitions:
             try:
                 poly = SafetyPolygon(
@@ -56,10 +63,16 @@ class PolygonCollisionEngine:
                     coordinates=z.get("polygon_coordinates") or z.get("coordinates", []),
                     reassignment_eligible=z.get("reassignment_eligible", True)
                 )
-                self._zones[poly.zone_id] = poly
+                new_zones[poly.zone_id] = poly
             except Exception as e:
-                # Log error and continue with remaining valid zones
-                pass
+                logger.error(
+                    f"[PolygonEngine] Atomic zone reload rejected: malformed zone definition '{z.get('name') or z.get('id')}': {e}. "
+                    f"Preserving existing {len(self._zones)} active zone(s) to maintain continuous safety enforcement."
+                )
+                return  # Abort replacement; preserve previous self._zones
+
+        # Atomic swap only after all definitions in the batch succeed
+        self._zones = new_zones
 
     def check_point(self, norm_x: float, norm_y: float) -> Optional[SafetyPolygon]:
         """

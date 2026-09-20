@@ -16,11 +16,13 @@ from core.security import (
     get_password_hash,
     create_access_token,
     get_current_user_token,
+    RoleChecker,
     TokenPayload,
     UserRole
 )
 from core.config import settings
 from models.user import User
+from models.audit import AuditLog
 from schemas.safety import Token, UserCreate, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication & RBAC"])
@@ -115,7 +117,11 @@ def login_for_access_token(
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
+def register_user(
+    user_in: UserCreate,
+    token: TokenPayload = Depends(RoleChecker([UserRole.ADMIN])),
+    db: Session = Depends(get_db)
+):
     existing = db.query(User).filter(User.email == user_in.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -128,6 +134,19 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         site_id=user_in.site_id
     )
     db.add(new_user)
+    db.flush()
+
+    audit = AuditLog(
+        user_id=token.sub,
+        user_email=token.email,
+        action="CREATE_USER_ACCOUNT",
+        entity_type="User",
+        entity_id=new_user.id,
+        severity="info",
+        message=f"Admin '{token.email}' provisioned new user account '{new_user.email}' with role '{new_user.role}'.",
+        changes_json=f'{{"role": "{new_user.role}", "email": "{new_user.email}"}}'
+    )
+    db.add(audit)
     db.commit()
     db.refresh(new_user)
     return new_user
