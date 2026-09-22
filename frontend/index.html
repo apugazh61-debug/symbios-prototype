@@ -774,7 +774,7 @@ updateAuthUI();
 // Initialize & Load Zones from Database
 async function loadSafetyZones() {
   try {
-    const res = await fetch(`${API_BASE}/api/v1/zones`);
+    const res = await fetch(`${API_BASE}/api/v1/zones?camera_id=cam-cell-04&active_only=true`);
     activeZones = await res.json();
     document.getElementById("kpiZones").textContent = `${activeZones.length} Active Polygon${activeZones.length !== 1 ? 's' : ''}`;
     drawZones();
@@ -786,37 +786,71 @@ async function loadSafetyZones() {
 // Render Polygon Safety Zones
 function drawZones() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  activeZones.forEach(z => {
+  activeZones.forEach((z, idx) => {
     const coords = z.polygon_coordinates;
     if (!coords || coords.length < 3) return;
 
     ctx.beginPath();
-    coords.forEach((pt, idx) => {
+    coords.forEach((pt, i) => {
       const px = pt[0] * overlay.width;
       const py = pt[1] * overlay.height;
-      if (idx === 0) ctx.moveTo(px, py);
+      if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     });
     ctx.closePath();
 
     // Style by risk tier
     const isCritical = z.risk_tier === "critical" || z.risk_tier === "high";
-    ctx.strokeStyle = isCritical ? "#E85C4A" : "#FFB000";
-    ctx.lineWidth = 3;
+    const strokeColor = isCritical ? "#E85C4A" : "#FFB000";
+    const fillColor = isCritical ? "rgba(232, 92, 74, 0.12)" : "rgba(255, 176, 0, 0.10)";
+
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2.5;
     ctx.setLineDash([8, 6]);
     ctx.stroke();
 
     // Translucent fill
-    ctx.fillStyle = isCritical ? "rgba(232, 92, 74, 0.15)" : "rgba(255, 176, 0, 0.12)";
+    ctx.fillStyle = fillColor;
     ctx.fill();
 
-    // Zone Label
+    // Sleek glassmorphism pill badge for zone label
     ctx.setLineDash([]);
-    ctx.fillStyle = isCritical ? "#E85C4A" : "#FFB000";
-    ctx.font = "bold 13px sans-serif";
-    const firstX = coords[0][0] * overlay.width;
-    const firstY = coords[0][1] * overlay.height;
-    ctx.fillText(`${z.name} [${z.risk_tier.toUpperCase()}]`, firstX + 8, firstY + 20);
+    const labelText = `${z.name} · ${z.risk_tier.toUpperCase()}`;
+    ctx.font = "bold 11px system-ui, -apple-system, sans-serif";
+    const textMetrics = ctx.measureText(labelText);
+    const badgeW = textMetrics.width + 22;
+    const badgeH = 22;
+
+    // Position badge at top-left of zone with offset for multiple zones
+    let minX = coords[0][0], minY = coords[0][1];
+    coords.forEach(pt => {
+      if (pt[1] < minY) { minY = pt[1]; minX = pt[0]; }
+    });
+    const badgeX = Math.min(Math.max(minX * overlay.width + 6, 8), overlay.width - badgeW - 8);
+    const badgeY = Math.min(Math.max(minY * overlay.height + 8 + (idx * 26), 8), overlay.height - badgeH - 8);
+
+    // Pill background
+    ctx.fillStyle = "rgba(15, 23, 42, 0.90)";
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    // Status dot
+    ctx.fillStyle = strokeColor;
+    ctx.beginPath();
+    ctx.arc(badgeX + 9, badgeY + badgeH / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Badge text
+    ctx.fillStyle = "#F8FAFC";
+    ctx.fillText(labelText, badgeX + 17, badgeY + 15);
   });
 }
 
